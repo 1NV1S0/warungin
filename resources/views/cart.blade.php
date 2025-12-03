@@ -24,33 +24,69 @@
 
     <main class="max-w-md mx-auto px-4 py-6 pb-24">
 
+        <!-- ALERT ERROR UMUM -->
         @if(session('error'))
-            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
-                {{ session('error') }}
+            <div class="bg-red-500 text-white px-4 py-4 rounded-xl shadow-lg mb-6 flex items-start gap-3 animate-pulse">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <div>
+                    <h4 class="font-bold text-lg">Gagal Memesan!</h4>
+                    <p class="text-sm">{{ session('error') }}</p>
+                </div>
+            </div>
+        @endif
+
+        <!-- ALERT SUKSES -->
+        @if(session('success'))
+            <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded shadow-sm mb-6 flex justify-between items-center">
+                <span>{{ session('success') }}</span>
+                <button onclick="this.parentElement.remove()" class="text-green-700 font-bold">&times;</button>
             </div>
         @endif
 
         @if(session('cart'))
             <!-- Daftar Menu -->
             <div class="bg-white rounded-xl shadow-sm p-4 mb-6">
-                <h3 class="font-bold text-gray-500 mb-3 text-sm">ITEM DIPESAN</h3>
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="font-bold text-gray-500 text-sm">ITEM DIPESAN</h3>
+                    <a href="{{ route('clear_cart') }}" class="text-xs text-red-500 underline hover:text-red-700">Hapus Semua</a>
+                </div>
+
                 @php $total = 0; @endphp
                 @foreach(session('cart') as $id => $details)
-                    @php $total += $details['price'] * $details['quantity'] @endphp
-                    <div class="flex justify-between items-center py-3 border-b border-gray-100 last:border-0">
+                    @php $total += $details['price'] * $details['quantity']; @endphp
+                    
+                    <div class="flex justify-between items-center py-3 border-b border-gray-100 last:border-0 group">
                         <div class="flex gap-3 items-center">
-                            <div class="bg-orange-100 text-orange-600 font-bold w-8 h-8 rounded flex items-center justify-center text-sm">
-                                {{ $details['quantity'] }}x
+                            <!-- Gambar Kecil -->
+                            <div class="w-12 h-12 bg-gray-100 rounded-lg bg-cover bg-center flex-shrink-0"
+                                 style="background-image: url('{{ $details['image'] ? asset('storage/'.$details['image']) : 'https://placehold.co/100x100' }}')">
                             </div>
+                            
                             <div>
-                                <h4 class="font-bold text-sm">{{ $details['name'] }}</h4>
-                                <p class="text-xs text-gray-400">@ Rp {{ number_format($details['price'], 0, ',', '.') }}</p>
+                                <h4 class="font-bold text-sm line-clamp-1">{{ $details['name'] }}</h4>
+                                <div class="flex items-center gap-2 text-xs text-gray-500">
+                                    <span class="bg-gray-100 px-2 py-0.5 rounded text-gray-700 font-bold">{{ $details['quantity'] }}x</span>
+                                    <span>@ Rp {{ number_format($details['price'], 0, ',', '.') }}</span>
+                                </div>
                             </div>
                         </div>
-                        <p class="font-bold text-sm">Rp {{ number_format($details['price'] * $details['quantity'], 0, ',', '.') }}</p>
+
+                        <div class="flex items-center gap-3">
+                            <p class="font-bold text-sm text-gray-700">Rp {{ number_format($details['price'] * $details['quantity'], 0, ',', '.') }}</p>
+                            
+                            <!-- TOMBOL HAPUS PER ITEM -->
+                            <a href="{{ route('remove_from_cart', $id) }}" class="p-2 bg-red-50 rounded-full text-red-500 hover:bg-red-100 transition" title="Hapus Item">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </a>
+                        </div>
                     </div>
                 @endforeach
-                <div class="mt-4 flex justify-between items-center pt-2">
+                
+                <div class="mt-4 flex justify-between items-center pt-2 border-t border-gray-100">
                     <span class="font-bold text-gray-600">Total Harga</span>
                     <span class="font-bold text-xl text-orange-600">Rp {{ number_format($total, 0, ',', '.') }}</span>
                 </div>
@@ -67,10 +103,15 @@
                            class="w-full border-gray-300 rounded-lg shadow-sm focus:border-orange-500 focus:ring-orange-500 p-2 border">
                 </div>
 
-                <div class="mb-4">
-                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">No. WhatsApp / HP</label>
-                    <input type="number" name="customer_phone" required placeholder="0812xxxxx"
-                           class="w-full border-gray-300 rounded-lg shadow-sm focus:border-orange-500 focus:ring-orange-500 p-2 border">
+                <!-- Input No HP (Muncul Jika Booking) -->
+                <div class="mb-4 hidden" id="phoneInputContainer">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">No. WhatsApp / HP (Wajib untuk Booking)</label>
+                    <input type="number" name="customer_phone" id="phoneInput" placeholder="0812xxxxx"
+                           class="w-full border rounded-lg p-2 border @error('customer_phone') border-red-500 bg-red-50 @enderror">
+                    
+                    @error('customer_phone')
+                        <p class="text-red-500 text-xs mt-1 font-bold">{{ $message }}</p>
+                    @enderror
                 </div>
 
                 <!-- Pilihan Tipe Pesanan -->
@@ -101,19 +142,27 @@
                 <!-- Input Khusus Dine In (Pilih Meja) -->
                 <div id="dineInInput" class="hidden mb-4 bg-gray-50 p-3 rounded-lg border border-dashed border-gray-300">
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Pilih Meja</label>
-                    <select name="table_id" class="w-full border-gray-300 rounded-lg p-2 border">
+                    <select name="table_id" class="w-full border-gray-300 rounded-lg p-2 border @error('table_id') border-red-500 bg-red-50 @enderror">
                         <option value="">-- Pilih Meja Kosong --</option>
                         @foreach($tables as $table)
                             <option value="{{ $table->id }}">{{ $table->table_number }} ({{ $table->capacity }} org)</option>
                         @endforeach
                     </select>
+                    
+                    @error('table_id')
+                        <p class="text-red-500 text-xs mt-1 font-bold">{{ $message }}</p>
+                    @enderror
                 </div>
 
                 <!-- Input Khusus Booking (Pilih Jam) -->
                 <div id="bookingInput" class="hidden mb-4 bg-gray-50 p-3 rounded-lg border border-dashed border-gray-300">
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Mau datang jam berapa?</label>
                     <input type="datetime-local" name="booking_time" 
-                           class="w-full border-gray-300 rounded-lg p-2 border">
+                           class="w-full border-gray-300 rounded-lg p-2 border @error('booking_time') border-red-500 bg-red-50 @enderror">
+                    
+                    @error('booking_time')
+                        <p class="text-red-500 text-xs mt-1 font-bold">{{ $message }}</p>
+                    @enderror
                 </div>
 
                 <button type="submit" class="w-full bg-orange-600 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-orange-700 transition">
@@ -137,7 +186,7 @@
 
     </main>
 
-    <!-- Script Sederhana untuk Ganti Form -->
+    <!-- Script Logika Tampilan -->
     <script>
         function toggleOrderType() {
             const types = document.getElementsByName('order_type');
@@ -151,15 +200,21 @@
 
             const dineInInput = document.getElementById('dineInInput');
             const bookingInput = document.getElementById('bookingInput');
+            const phoneInputContainer = document.getElementById('phoneInputContainer');
+            const phoneInputField = document.getElementById('phoneInput');
 
             // Reset
             dineInInput.classList.add('hidden');
             bookingInput.classList.add('hidden');
+            phoneInputContainer.classList.add('hidden');
+            phoneInputField.required = false;
 
             if (selectedValue === 'dine_in') {
                 dineInInput.classList.remove('hidden');
             } else if (selectedValue === 'booking') {
                 bookingInput.classList.remove('hidden');
+                phoneInputContainer.classList.remove('hidden');
+                phoneInputField.required = true;
             }
         }
     </script>

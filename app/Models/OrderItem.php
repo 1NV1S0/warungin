@@ -18,7 +18,7 @@ class OrderItem extends Model
     // Relasi: Item ini terhubung ke Menu apa?
     public function menu()
     {
-        return $this->belongsTo(Menu::class);
+        return $this->belongsTo(Menu::class)->withTrashed();
     }
     
     // Relasi: Item ini milik Order yang mana?

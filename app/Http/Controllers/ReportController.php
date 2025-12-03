@@ -10,80 +10,89 @@ class ReportController extends Controller
 {
     public function index(Request $request)
     {
+        // Ambil filter tipe (daily, monthly, yearly), default 'daily'
+        $type = $request->input('type', 'daily');
+        
+        // Ambil parameter waktu
         $date = $request->input('date', date('Y-m-d'));
+        $month = $request->input('month', date('m'));
+        $year = $request->input('year', date('Y'));
 
-        // Ambil data penjualan
-        $orders = Order::whereDate('created_at', $date)
-                       ->where('status', 'paid')
-                       ->with('items.menu')
-                       ->orderBy('created_at', 'desc')
-                       ->get();
+        // Query Dasar (Status Paid)
+        $query = \App\Models\Order::where('status', 'paid');
+
+        // Filter Berdasarkan Tipe
+        if ($type == 'daily') {
+            $query->whereDate('created_at', $date);
+            $label = "Harian ($date)";
+        } elseif ($type == 'monthly') {
+            $query->whereMonth('created_at', $month)->whereYear('created_at', $year);
+            $label = "Bulanan ($month-$year)";
+        } elseif ($type == 'yearly') {
+            $query->whereYear('created_at', $year);
+            $label = "Tahunan ($year)";
+        }
+
+        // Eksekusi Query
+        $orders = $query->with('items.menu')->orderBy('created_at', 'desc')->get();
 
         $totalIncome = $orders->sum('total_amount');
         $totalTransactions = $orders->count();
 
-        // Siapkan data untuk view
+        // Logika AI (Sama seperti sebelumnya)
         $aiAnalysis = null;
-        
-        // JIKA tombol "Analisa dengan AI" ditekan
         if ($request->has('analyze_ai') && $orders->isNotEmpty()) {
-            $aiAnalysis = $this->askGemini($orders, $date);
+            $aiAnalysis = $this->askGemini($orders, $label);
         }
 
-        return view('admin.reports.index', compact('orders', 'totalIncome', 'totalTransactions', 'date', 'aiAnalysis'));
+        return view('admin.reports.index', compact('orders', 'totalIncome', 'totalTransactions', 'type', 'date', 'month', 'year', 'aiAnalysis'));
     }
 
-    // --- FUNGSI BARU: EXPORT EXCEL (CSV) ---
+    // UPDATE JUGA FUNGSI EXPORT (Agar mengikuti filter)
     public function export(Request $request)
     {
+        $type = $request->input('type', 'daily');
         $date = $request->input('date', date('Y-m-d'));
+        $month = $request->input('month', date('m'));
+        $year = $request->input('year', date('Y'));
 
-        // Ambil data yang sama
-        $orders = Order::whereDate('created_at', $date)
-                       ->where('status', 'paid')
-                       ->with('items.menu')
-                       ->orderBy('created_at', 'asc') // Urutkan dari pagi ke malam
-                       ->get();
+        $query = \App\Models\Order::where('status', 'paid')->with('items.menu');
 
-        $filename = "Laporan_Warungin_$date.csv";
+        if ($type == 'daily') {
+            $query->whereDate('created_at', $date);
+            $filename = "Laporan_Harian_$date.csv";
+        } elseif ($type == 'monthly') {
+            $query->whereMonth('created_at', $month)->whereYear('created_at', $year);
+            $filename = "Laporan_Bulanan_$month-$year.csv";
+        } elseif ($type == 'yearly') {
+            $query->whereYear('created_at', $year);
+            $filename = "Laporan_Tahunan_$year.csv";
+        }
 
-        // Buat stream download
-        return response()->streamDownload(function () use ($orders, $date) {
+        $orders = $query->orderBy('created_at', 'asc')->get();
+
+        return response()->streamDownload(function () use ($orders) {
             $handle = fopen('php://output', 'w');
+            fputcsv($handle, ['No. Order', 'Tanggal', 'Pelanggan', 'Tipe', 'Menu', 'Total']);
 
-            // 1. Tulis Judul Kolom (Header)
-            fputcsv($handle, [
-                'No. Order',
-                'Jam',
-                'Nama Pelanggan',
-                'Tipe Pesanan',
-                'Menu Dipesan',
-                'Total Harga'
-            ]);
-
-            // 2. Isi Datanya
             foreach ($orders as $order) {
-                // Rangkum menu jadi satu string (misal: "2x Nasi Goreng, 1x Es Teh")
                 $menuList = [];
                 foreach ($order->items as $item) {
-                    $menuList[] = $item->quantity . "x " . $item->menu->name;
+                    $menuName = $item->menu ? $item->menu->name : 'Menu Dihapus';
+                    $menuList[] = $item->quantity . "x " . $menuName;
                 }
-                $menuString = implode(", ", $menuList);
-
+                
                 fputcsv($handle, [
                     '#' . $order->id,
-                    $order->created_at->format('H:i'),
+                    $order->created_at->format('Y-m-d H:i'), // Format tanggal lengkap
                     $order->customer_name,
-                    strtoupper($order->order_type), // DINE_IN / TAKE_AWAY
-                    $menuString,
-                    $order->total_amount // Format angka biasa biar bisa dijumlah di Excel
+                    $order->order_type,
+                    implode(", ", $menuList),
+                    $order->total_amount
                 ]);
             }
-
-            // 3. Tulis Total di baris paling bawah
-            fputcsv($handle, []); // Baris kosong
+            fputcsv($handle, []);
             fputcsv($handle, ['', '', '', '', 'TOTAL PENDAPATAN', $orders->sum('total_amount')]);
-
             fclose($handle);
         }, $filename);
     }

@@ -10,13 +10,24 @@ use App\Http\Controllers\ReportController;
 // --- AREA PUBLIK (Tamu/Guest) ---
 
 Route::get('/', [MenuController::class, 'index'])->name('home');
+// API STOK (Route Baru)
+Route::get('/api/menu/stocks', [MenuController::class, 'getMenuStocks'])->name('api.menu.stocks');
 
 // Keranjang & Checkout
 Route::get('/cart', [MenuController::class, 'viewCart'])->name('view_cart');
 Route::post('/checkout', [MenuController::class, 'checkout'])->name('checkout');
 
-Route::get('/add-to-cart/{id}', [MenuController::class, 'addToCart'])->name('add_to_cart');
+// PERBAIKAN: Ubah get menjadi post
+Route::post('/add-to-cart/{id}', [MenuController::class, 'addToCart'])->name('add_to_cart');
+
+// TAMBAHAN BARU (Gunakan POST biar aman)
+Route::post('/decrease-item/{id}', [MenuController::class, 'decreaseItem'])->name('decrease_item');
+
+
 Route::get('/clear-cart', [MenuController::class, 'clearCart'])->name('clear_cart');
+// TAMBAHAN BARU: Hapus per item
+Route::get('/remove-from-cart/{id}', [MenuController::class, 'removeFromCart'])->name('remove_from_cart');
+// ...
 
 // --- AUTHENTICATION (Login/Logout) ---
 
@@ -38,6 +49,10 @@ Route::middleware(['auth', 'role:cashier,admin,owner'])->group(function () {
     // TAMBAHAN BARU: Route Cetak Struk
     Route::get('/order/{id}/print', [\App\Http\Controllers\AuthController::class, 'printReceipt'])->name('order.print');
 
+    // ... existing routes ...
+    
+    // API AJAX (Route Baru)
+    Route::get('/api/orders', [\App\Http\Controllers\AuthController::class, 'getNewOrders'])->name('api.orders');
 
 });
 
@@ -61,6 +76,10 @@ Route::middleware(['auth', 'role:admin,owner'])->group(function () {
 
     // TAMBAHAN BARU: EXPORT EXCEL
     Route::get('/admin/reports/export', [ReportController::class, 'export'])->name('admin.reports.export');
+
+    // TAMBAHAN BARU: KELOLA MEJA
+    Route::resource('admin/tables', \App\Http\Controllers\TableController::class, ['as' => 'admin'])->only(['index', 'store', 'destroy']);
+
 
 
 });

@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use App\Models\Menu;
 use App\Models\Order;
 use App\Models\OrderItem;
-use App\Models\Table; 
+use App\Models\Table;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Auth;
 
 class MenuController extends Controller
 {
@@ -22,20 +24,32 @@ class MenuController extends Controller
         return view('home', compact('groupedMenus'));
     }
 
-    // FUNGSI BARU: Tambah ke Keranjang
-    public function addToCart($id)
+    public function getMenuStocks()
+    {
+        $menus = Menu::select('id', 'stock', 'is_available')->get();
+        return response()->json(['success' => true, 'data' => $menus]);
+    }
+
+    // UPDATE: Tambahkan Request $request
+    public function addToCart(Request $request, $id)
     {
         $menu = Menu::findOrFail($id);
-
-        // Ambil keranjang saat ini dari session (kalau kosong, buat array baru)
         $cart = session()->get('cart', []);
 
-        // Cek: Apakah menu ini sudah ada di keranjang?
+        $currentQtyInCart = isset($cart[$id]) ? $cart[$id]['quantity'] : 0;
+
+        // Cek Stok
+        if (($currentQtyInCart + 1) > $menu->stock) {
+            $msg = 'Maaf, stok tidak cukup! Sisa stok cuma ' . $menu->stock;
+            if ($request->ajax()) {
+                return response()->json(['success' => false, 'message' => $msg]);
+            }
+            return redirect()->back()->with('error', $msg);
+        }
+
         if(isset($cart[$id])) {
-            // Kalau sudah ada, tambah jumlahnya (quantity + 1)
             $cart[$id]['quantity']++;
         } else {
-            // Kalau belum ada, masukkan sebagai item baru
             $cart[$id] = [
                 "name" => $menu->name,
                 "quantity" => 1,
@@ -44,82 +58,112 @@ class MenuController extends Controller
             ];
         }
 
-        // Simpan kembali ke session
         session()->put('cart', $cart);
+        session()->save(); // <--- PENTING: Paksa simpan session biar gak nge-bug
 
-        // Kembali ke halaman menu dengan pesan sukses
+        // Hitung Total
+        $totalQty = 0;
+        $totalPrice = 0;
+        foreach($cart as $item) { 
+            $totalQty += $item['quantity']; 
+            $totalPrice += $item['price'] * $item['quantity'];
+        }
+
+        if ($request->ajax()) {
+            return response()->json([
+                'success' => true, 
+                'message' => 'Berhasil masuk keranjang!',
+                'total_qty' => $totalQty,
+                'cart' => $cart,
+                'total_price' => $totalPrice
+            ]);
+        }
+
         return redirect()->back()->with('success', 'Menu berhasil ditambahkan!');
     }
 
-    // FUNGSI BARU: Kosongkan Keranjang (Reset)
     public function clearCart()
     {
         session()->forget('cart');
         return redirect()->back();
     }
 
-    // --- FUNGSI BARU DI BAWAH INI ---
+    public function removeFromCart($id)
+    {
+        $cart = session()->get('cart');
+        if(isset($cart[$id])) {
+            unset($cart[$id]);
+            session()->put('cart', $cart);
+        }
+        return redirect()->back()->with('success', 'Item berhasil dihapus!');
+    }
 
-    // 1. Tampilkan Halaman Keranjang
     public function viewCart()
     {
-        // Ambil data meja yang kosong buat pilihan Dine In
         $tables = Table::where('status', 'available')->get();
         return view('cart', compact('tables'));
     }
 
-    // 2. Proses Checkout (Simpan ke Database)
     public function checkout(Request $request)
     {
-        // Validasi Input
-        $request->validate([
+        // ... (Kode Checkout Tetap Sama, Tidak Perlu Diubah) ...
+        // Agar tidak kepanjangan, saya persingkat di sini karena fokus kita di addToCart
+        // Gunakan kode checkout terakhir yang sudah ada validasi meja & stok
+        
+        $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
             'customer_name' => 'required|string|max:255',
-            'customer_phone' => 'required|string|max:15',
             'order_type' => 'required|in:dine_in,take_away,booking',
-            'booking_time' => 'required_if:order_type,booking', // Wajib kalau booking
-            'table_id' => 'required_if:order_type,dine_in', // Wajib kalau makan di tempat
+            'customer_phone' => 'required_if:order_type,booking|nullable|string|max:15',
+            'booking_time' => 'required_if:order_type,booking',
+            'table_id' => 'required_if:order_type,dine_in',
         ]);
 
+        if ($validator->fails()) {
+            return redirect()->back()->withErrors($validator)->withInput()->with('error', 'Mohon lengkapi data pesanan!'); 
+        }
+
         $cart = session('cart');
+        if(!$cart) return redirect()->back()->with('error', 'Keranjang kosong!');
 
-        // Cek kalau keranjang kosong
-        if(!$cart) {
-            return redirect()->back()->with('error', 'Keranjang kosong!');
-        }
-
-        // Hitung Total
         $totalAmount = 0;
-        foreach($cart as $id => $details) {
-            $totalAmount += $details['price'] * $details['quantity'];
-        }
+        foreach($cart as $details) { $totalAmount += $details['price'] * $details['quantity']; }
 
-        // Mulai Transaksi Database (Biar aman, kalau error satu batal semua)
         DB::beginTransaction();
-
         try {
-            // 1. Buat Order Baru
+            if ($request->order_type == 'dine_in') {
+                $table = \App\Models\Table::lockForUpdate()->find($request->table_id); 
+                if (!$table || $table->status != 'available') {
+                    DB::rollBack();
+                    return redirect()->route('view_cart')->withInput()->with('error', "Meja tidak tersedia.");
+                }
+                $table->update(['status' => 'occupied']);
+            }
+
+            foreach($cart as $id => $details) {
+                $menu = Menu::lockForUpdate()->find($id);
+                if(!$menu || $menu->stock < $details['quantity']) {
+                    DB::rollBack();
+                    return redirect()->route('view_cart')->with('error', 'Stok ' . $menu->name . ' habis!');
+                }
+            }
+
+            $isStaff = Auth::check() && in_array(Auth::user()->role, ['cashier', 'admin', 'owner']);
+            $initialStatus = $isStaff ? 'confirmed' : 'pending';
+
             $order = Order::create([
-                'guest_token' => session()->getId(), // Pakai ID Session browser sebagai token
+                'guest_token' => session()->getId(),
                 'customer_name' => $request->customer_name,
                 'customer_phone' => $request->customer_phone,
-                'table_id' => $request->table_id, // Nullable kalau take away
+                'table_id' => $request->table_id,
                 'total_amount' => $totalAmount,
                 'order_type' => $request->order_type,
-                'status' => 'pending', // Status awal Pending (tunggu konfirmasi kasir)
+                'status' => $initialStatus,
                 'booking_time' => $request->booking_time,
+                'cashier_id' => $isStaff ? Auth::id() : null,
             ]);
 
-            // 2. Masukkan Item ke order_items & Kurangi Stok
             foreach($cart as $id => $details) {
                 $menu = Menu::find($id);
-                
-                // Cek stok lagi biar aman
-                if($menu->stock < $details['quantity']) {
-                    DB::rollBack(); // Batalkan semua
-                    return redirect()->back()->with('error', 'Stok ' . $menu->name . ' tidak mencukupi!');
-                }
-
-                // Simpan Item
                 OrderItem::create([
                     'order_id' => $order->id,
                     'menu_id' => $id,
@@ -127,23 +171,59 @@ class MenuController extends Controller
                     'price_at_time' => $details['price'],
                     'subtotal' => $details['price'] * $details['quantity']
                 ]);
-
-                // Kurangi Stok Menu
                 $menu->decrement('stock', $details['quantity']);
             }
 
-            DB::commit(); // Simpan permanen
-
-            // 3. Bersihkan Keranjang
+            DB::commit();
             session()->forget('cart');
 
-            // Redirect ke halaman sukses (nanti kita buat)
-            return redirect()->route('home')->with('success', 'Pesanan Berhasil Dibuat! Silakan tunggu konfirmasi.');
+            if ($isStaff) return redirect()->route('dashboard')->with('success', 'Pesanan Walk-in Berhasil!');
+            return redirect()->route('home')->with('success', 'Pesanan Berhasil!');
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return redirect()->back()->with('error', 'Terjadi kesalahan: ' . $e->getMessage());
+            return redirect()->route('view_cart')->with('error', 'Error: ' . $e->getMessage());
         }
     }
-}
 
+     // FUNGSI BARU: Kurangi Item (-1)
+    public function decreaseItem(Request $request, $id)
+    {
+        $cart = session()->get('cart');
+
+        if(isset($cart[$id])) {
+            // Jika jumlah lebih dari 1, kurangi
+            if($cart[$id]['quantity'] > 1) {
+                $cart[$id]['quantity']--;
+            } else {
+                // Jika sisa 1 dan dikurangi, maka hapus item
+                unset($cart[$id]);
+            }
+            
+            session()->put('cart', $cart);
+            session()->save();
+        }
+
+        // Hitung ulang total untuk respon AJAX
+        $totalQty = 0;
+        $totalPrice = 0;
+        if(session('cart')) {
+            foreach(session('cart') as $item) { 
+                $totalQty += $item['quantity']; 
+                $totalPrice += $item['price'] * $item['quantity'];
+            }
+        }
+
+        if ($request->ajax()) {
+            return response()->json([
+                'success' => true, 
+                'message' => 'Item dikurangi!',
+                'total_qty' => $totalQty,
+                'cart' => session('cart'), // Kirim sisa keranjang
+                'total_price' => $totalPrice
+            ]);
+        }
+
+        return redirect()->back();
+    }
+}

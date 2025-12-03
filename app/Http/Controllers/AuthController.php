@@ -64,15 +64,32 @@ class AuthController extends Controller
         return view('dashboard', compact('orders'));
     }
     
-    // 5. Update Status Pesanan
+    // 5. Update Status Pesanan (DENGAN LOGIKA MEJA OTOMATIS)
     public function updateStatus(Request $request, $id)
     {
-        $order = Order::findOrFail($id);
-        $order->status = $request->status;
+        $order = Order::with('table')->findOrFail($id);
+        $oldStatus = $order->status;
+        $newStatus = $request->status;
+
+        // Update status order
+        $order->status = $newStatus;
         $order->save();
+
+        // --- LOGIKA LEPAS MEJA ---
+        // Jika meja ada (cek objeknya langsung) DAN status baru adalah 'paid' atau 'cancelled'
+        // Maka meja harus dikosongkan kembali (available)
+        // PERBAIKAN: Tambahkan () pada ->table() saat update
+        // Ini memaksa Laravel memanggil Relasi (Query Builder), bukan properti nama tabel
+        if ($order->table && in_array($newStatus, ['paid', 'cancelled'])) {
+            $order->table()->update(['status' => 'available']);
+        }
         
-        return redirect()->back()->with('success', 'Status pesanan diperbarui!');
+        // Catatan: Kalau statusnya masih 'confirmed' atau 'served', meja TETAP 'occupied'
+        // -------------------------
+        
+        return redirect()->back()->with('success', "Status pesanan diperbarui menjadi $newStatus!");
     }
+
 
     // 6. Cetak Struk (TAMBAHAN BARU)
     public function printReceipt($id)
@@ -81,5 +98,22 @@ class AuthController extends Controller
         $order = \App\Models\Order::with(['items.menu', 'table', 'cashier'])->findOrFail($id);
         
         return view('receipt', compact('order'));
+    }
+
+    // 7. API untuk AJAX (Ambil data pesanan terbaru)
+    public function getNewOrders()
+    {
+        // Ambil pesanan yang belum selesai (pending, confirmed, served)
+        // Urutkan dari yang terbaru
+        $orders = \App\Models\Order::whereNotIn('status', ['paid', 'cancelled'])
+                       ->orderBy('created_at', 'desc')
+                       ->with(['items.menu', 'table']) // Load relasi biar lengkap
+                       ->get();
+
+        // Kembalikan dalam format JSON
+        return response()->json([
+            'success' => true,
+            'orders' => $orders
+        ]);
     }
 }

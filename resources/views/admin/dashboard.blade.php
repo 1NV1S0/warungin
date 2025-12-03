@@ -60,6 +60,13 @@
                             <div class="text-2xl mb-2">📊</div>
                             <div class="font-bold text-purple-700 text-sm">Laporan Keuangan</div>
                         </a>
+
+                        <!-- TAMBAHAN BARU: KELOLA MEJA -->
+                        <a href="{{ route('admin.tables.index') }}" class="p-4 bg-green-50 rounded-xl text-center hover:bg-green-100 transition border border-green-100">
+                            <div class="text-2xl mb-2">🪑</div>
+                            <div class="font-bold text-green-700 text-sm">Kelola Meja</div>
+                        </a>
+
                         <a href="{{ route('dashboard') }}" class="p-4 bg-blue-50 rounded-xl text-center hover:bg-blue-100 transition border border-blue-100">
                             <div class="text-2xl mb-2">👨‍🍳</div>
                             <div class="font-bold text-blue-700 text-sm">Lihat Dapur</div>
