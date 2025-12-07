@@ -11,7 +11,8 @@ class DatabaseSeeder extends Seeder
         // Panggil seeder yang sudah kita tulis tadi
         $this->call([
             MenuSeeder::class,
-            TableSeeder::class,
+            TableSeeder::class, 
+            UserSeeder::class
         ]);
     }
 }
